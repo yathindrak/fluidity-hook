@@ -91,8 +91,8 @@ library TWAPManager {
     /// Determines if a rebalance of liquidity is necessary based on the current price deviation
     /// @param currentPriceX96 The current market square root price in Q96 format.
     /// @param targetPriceX96 The target square root price (e.g., a TWAP) in Q96 format to compare against.
-    /// @param rebalanceThreshold The percentage deviation threshold in basis points (e.g., 500 for 0.5%, 100 for 0.1%, 50 for 0.05%).
-    /// This value is in basis points, multiplied by 10000 to allow for two decimal places of precision.
+    /// @param rebalanceThreshold The percentage deviation threshold in basis points (e.g., `50` for 0.5%, `100` for 1%).
+    /// This value is in basis points, multiplied by 100 to allow for two decimal places of precision.
     /// @return True if the absolute price deviation is greater than or equal to the `rebalanceThreshold`; otherwise, false.
     function isRebalanceNeeded(
         uint160 currentPriceX96,
@@ -109,7 +109,7 @@ library TWAPManager {
         
         // Calculate the percentage deviation relative to the target price.
         // The `10000` factor scales the comparison to handle `rebalanceThreshold` as
-        // a value representing hundredths of a percent (e.g., 500 for 0.5%, 100 for 0.1%, 50 for 0.05%).
+        // a value representing basis points (e.g., 50 for 0.5%, 100 for 1%).
         return (priceDiff * 10000) / targetPriceX96 >= rebalanceThreshold;
     }
 }

@@ -9,6 +9,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BaseScript} from "./base/BaseScript.sol";
 import {LiquidityHelpers} from "./base/LiquidityHelpers.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {LiquidityRebalancer} from "../src/RebalanceHook.sol";
 
 contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
     using CurrencyLibrary for Currency;
@@ -24,8 +25,9 @@ contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
     uint160 startingPrice = 2 ** 96; // Starting price, sqrtPriceX96; floor(sqrt(1) * 2^96)
 
     // --- liquidity position configuration --- //
-    uint256 public token0Amount = 100e18;  // mWETH (18 decimals)
-    uint256 public token1Amount = 100e6;   // mUSDC (6 decimals)
+    // 1 ETH = 4,503 USDC as of now, so for 1 ETH we need 4,503 USDC
+    uint256 public token0Amount = 1e18;    // 1 ETH (18 decimals)
+    uint256 public token1Amount = 4503e6;  // 4,503 USDC (6 decimals)
 
     // range of the position, must be a multiple of tickSpacing
     int24 tickLower;
@@ -53,42 +55,36 @@ contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
         tickLower = truncateTickSpacing((currentTick - 750 * tickSpacing), tickSpacing);
         tickUpper = truncateTickSpacing((currentTick + 750 * tickSpacing), tickSpacing);
 
-        // Converts token amounts to liquidity units
-        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
-            startingPrice,
-            TickMath.getSqrtPriceAtTick(tickLower),
-            TickMath.getSqrtPriceAtTick(tickUpper),
-            token0Amount,
-            token1Amount
-        );
-
-        // slippage limits
-        uint256 amount0Max = token0Amount + 1;
-        uint256 amount1Max = token1Amount + 1;
-
-        (bytes memory actions, bytes[] memory mintParams) = _mintLiquidityParams(
-            poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, deployerAddress, hookData
-        );
-
-        // multicall parameters
-        bytes[] memory params = new bytes[](2);
-
-        // Initialize Pool
-        params[0] = abi.encodeWithSelector(positionManager.initializePool.selector, poolKey, startingPrice, hookData);
-
-        // Mint Liquidity
-        params[1] = abi.encodeWithSelector(
-            positionManager.modifyLiquidities.selector, abi.encode(actions, mintParams), block.timestamp + 3600
-        );
-
-        // If the pool is an ETH pair, native tokens are to be transferred
-        uint256 valueToPass = currency0.isAddressZero() ? amount0Max : 0;
+        console2.log("Current tick:", currentTick);
+        console2.log("Tick lower:", tickLower);
+        console2.log("Tick upper:", tickUpper);
+        console2.log("Token0 amount:", token0Amount);
+        console2.log("Token1 amount:", token1Amount);
 
         vm.startBroadcast();
-        tokenApprovals();
+        
+        // First, initialize the pool using PositionManager
+        console2.log("Initializing pool...");
+        positionManager.initializePool(poolKey, startingPrice);
+        console2.log("Pool initialized successfully!");
 
-        // Multicall to atomically create pool & add liquidity
-        positionManager.multicall{value: valueToPass}(params);
+        // Get the LiquidityRebalancer instance
+        LiquidityRebalancer liquidityRebalancer = LiquidityRebalancer(address(hookContract));
+        
+        // Add liquidity using the LiquidityRebalancer's provisionLiquidity function
+        console2.log("Provisioning liquidity via LiquidityRebalancer...");
+        
+        LiquidityRebalancer.LiquidityProvision memory liquidityParams = LiquidityRebalancer.LiquidityProvision({
+            token0: currency0,
+            token1: currency1,
+            poolFee: lpFee,
+            amount: token0Amount, // Use token0Amount as the base amount
+            recipient: deployerAddress
+        });
+        
+        uint128 liquidity = liquidityRebalancer.provisionLiquidity(poolKey, liquidityParams);
+        console2.log("Liquidity provisioned successfully! Amount:", uint256(liquidity));
+        
         vm.stopBroadcast();
     }
 }

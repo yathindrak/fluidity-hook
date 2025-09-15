@@ -15,7 +15,7 @@ contract CheckPoolSlot0 is Script {
 
     function run() external {
         IPoolManager poolManager = IPoolManager(0xE03A1074c86CFeDd5C142C4F04F1a1536e203543);
-        PoolId poolId = PoolId.wrap(0x052eba5a9264e7867f43cd167f3302969e262a458a2f81b723ceafa3f02befd2);
+        PoolId poolId = PoolId.wrap(0x5dc638b2d38ca34ca2fbe00f2b975e38acaa7ed5b40f63ca657b1fa47e6fae5e);
         
         (uint160 sqrtPriceX96, int24 tick, uint128 liquidity, uint32 secondsInitialized) = poolManager.getSlot0(poolId);
 

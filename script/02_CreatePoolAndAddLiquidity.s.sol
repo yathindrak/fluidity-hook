@@ -1,16 +1,19 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {CurrencyLibrary, Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-
+import {console2} from "forge-std/console2.sol";
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {BaseScript} from "./base/BaseScript.sol";
 import {LiquidityHelpers} from "./base/LiquidityHelpers.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
     using CurrencyLibrary for Currency;
+    using PoolIdLibrary for PoolKey;
+    using Strings for uint256;
 
     /////////////////////////////////////
     // --- Configure These ---
@@ -37,6 +40,11 @@ contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
             tickSpacing: tickSpacing,
             hooks: hookContract
         });
+        console2.log("Pool Key: ");
+        console2.log(uint256(PoolId.unwrap(poolKey.toId())));
+        // hex version of the pool key
+        console2.log("Pool Key Hex: ");
+        console2.log(uint256(PoolId.unwrap(poolKey.toId())).toHexString());
 
         bytes memory hookData = new bytes(0);
 

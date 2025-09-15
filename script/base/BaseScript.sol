@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {Script} from "forge-std/Script.sol";
@@ -28,9 +27,9 @@ contract BaseScript is Script {
     /////////////////////////////////////
     // --- Configure These ---
     /////////////////////////////////////
-    IERC20 internal constant token0 = IERC20(0xE7220C5021cd3a6F5D25c69D50E071aD023Ec29F); // mWETH
-    IERC20 internal constant token1 = IERC20(0x5f651EB3729F7c11De22aF2dea7d45f18CE3fdfe); // mUSDC
-    IHooks constant hookContract = IHooks(address(0x768439A1a192bE391249E57238911D3010A2cAc0));
+    IERC20 internal constant token0 = IERC20(0x3e26F2e91B25Ff5A9F9C54772FF616B1ea7c9e4F); // mWETH
+    IERC20 internal constant token1 = IERC20(0xDa96Ef73Bd5422c46c12C19D45011a1dAf3CB61C); // mUSDC
+    IHooks constant hookContract = IHooks(address(0x0dF2530352d4755f1a16a3282a8763E454668Ac0));
     /////////////////////////////////////
 
     Currency immutable currency0;

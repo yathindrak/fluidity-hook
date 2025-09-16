@@ -18,13 +18,14 @@ contract DeployHookScript is BaseScript {
 
         // Mine a salt that will produce a hook address with the correct flags
         int24 tickOffset = 60;
-        bytes memory constructorArgs = abi.encode(poolManager, tickOffset);
+        address initialOwner = msg.sender; // Deployer becomes the initial owner
+        bytes memory constructorArgs = abi.encode(poolManager, tickOffset, initialOwner);
             (address hookAddress, bytes32 salt) =
                 HookMiner.find(CREATE2_FACTORY, flags, type(LiquidityRebalancer).creationCode, constructorArgs);
 
             // Deploy the hook using CREATE2
             vm.startBroadcast();
-            LiquidityRebalancer liquidityRebalancer = new LiquidityRebalancer{salt: salt}(poolManager, tickOffset);
+            LiquidityRebalancer liquidityRebalancer = new LiquidityRebalancer{salt: salt}(poolManager, tickOffset, initialOwner);
             vm.stopBroadcast();
 
             require(address(liquidityRebalancer) == hookAddress, "DeployHookScript: Hook Address Mismatch");

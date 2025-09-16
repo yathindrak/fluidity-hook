@@ -29,7 +29,7 @@ contract BaseScript is Script {
     /////////////////////////////////////
     IERC20 internal constant token0 = IERC20(0x9E1Cf8D3970ECcC2DFfa4aABbCDCbA8555F19EA6); // mWETH
     IERC20 internal constant token1 = IERC20(0x7Af099c105a27F389324a2c0A1F5Bb676c945106); // mUSDC
-    IHooks constant hookContract = IHooks(address(0x60121105481AA3355e8855B164c92908A752f880));
+    IHooks constant hookContract = IHooks(address(0x36962bb4425dEb27E0C989f6f5c39578d3b53880));
     /////////////////////////////////////
 
     Currency immutable currency0;

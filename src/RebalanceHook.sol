@@ -20,6 +20,8 @@ import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {FixedPoint96} from "@uniswap/v4-core/src/libraries/FixedPoint96.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {euint256, FHE, ebool, euint32} from "@fhenixprotocol/cofhe-contracts/FHE.sol";
+import {InEuint32} from "@fhenixprotocol/cofhe-contracts/ICofhe.sol";
 
 // Uniswap V4 hook contract to automatically rebalance concentrated liquidity positions for optimal capital efficiency
 contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
@@ -99,11 +101,18 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
 
     // Mappings to store pool-specific data
     mapping(PoolId => PoolConfiguration) public poolConfigurations; // Pool configuration data
-    mapping(PoolId => LiquidityPosition) public liquidityPositions; // Liquidity position data (aggregated from all positions)
-    mapping(PoolId => RebalancingStrategy) public rebalancingStrategies; // Rebalancing strategy settings
+    mapping(PoolId => LiquidityPosition) private liquidityPositions; // Liquidity position data (aggregated from all positions) - private for MEV protection
+
+    // Encrypted rebalancing strategy settings to prevent MEV extraction
+    mapping(PoolId => euint256) private encryptedPriceThresholds;
+    mapping(PoolId => euint32) private encryptedCooldownPeriods;
+    mapping(PoolId => euint32) private encryptedRangeWidths;
+    mapping(PoolId => ebool) private encryptedAutoRebalancing;
+    mapping(PoolId => euint32) private encryptedMaxSlippage;
     
-    // Track liquidity ownership: poolId => user => amount
-    mapping(PoolId => mapping(address => uint256)) public liquidityOwnership;
+    // Encrypted liquidity ownership to prevent position size analysis
+    mapping(PoolId => mapping(address => euint256)) private encryptedLiquidityOwnership;
+    mapping(PoolId => euint256) private encryptedTotalLiquidity;
 
     event LiquidityProvisioned(
         PoolId indexed poolId, // Pool identifier
@@ -121,6 +130,14 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         int24 upperTick // Upper tick of the range
     );
     
+    event EncryptedLiquidityWithdrawn(
+        PoolId indexed poolId, // Pool identifier
+        address indexed provider, // Liquidity provider
+        bytes encryptedAmount, // Encrypted liquidity amount withdrawn
+        bytes encryptedLowerTick, // Encrypted lower tick of the range
+        bytes encryptedUpperTick // Encrypted upper tick of the range
+    );
+    
     event RebalancingTriggered(
         PoolId indexed poolId, // Pool identifier
         int24 previousLowerTick, // Old range lower tick
@@ -130,28 +147,45 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         uint256 timestamp // Rebalancing timestamp
     );
     
-    event StrategyUpdated(
+    event EncryptedRebalancingTriggered(
         PoolId indexed poolId, // Pool identifier
-        uint24 priceThreshold, // New price threshold
-        uint32 cooldownPeriod, // New cooldown period
-        int24 rangeWidth, // New range width
-        bool autoRebalance // New auto-rebalancing setting
+        bytes encryptedPreviousLowerTick, // Encrypted old range lower tick
+        bytes encryptedPreviousUpperTick, // Encrypted old range upper tick
+        bytes encryptedNewLowerTick, // Encrypted new range lower tick
+        bytes encryptedNewUpperTick, // Encrypted new range upper tick
+        bytes encryptedTimestamp // Encrypted rebalancing timestamp
     );
-    
-    event DefaultStrategyUpdated(
-        uint24 priceThreshold, // Default price threshold
-        uint32 cooldownPeriod, // Default cooldown period
-        int24 rangeWidth, // Default range width
-        bool autoRebalance, // Default auto-rebalancing setting
-        uint24 maxSlippage // Default max slippage
-    );
-    
+
     event PoolDeactivated(
         PoolId indexed poolId // Pool identifier
     );
     
     event PoolReactivated(
         PoolId indexed poolId // Pool identifier
+    );
+    
+    // Fhenix-specific events for encrypted operations
+    event EncryptedStrategyUpdated(
+        PoolId indexed poolId, // Pool identifier
+        bytes encryptedThreshold, // Encrypted price threshold
+        bytes encryptedCooldown, // Encrypted cooldown period
+        bytes encryptedRangeWidth, // Encrypted range width
+        bytes encryptedAutoRebalance // Encrypted auto-rebalancing flag
+    );
+    
+    event EncryptedLiquidityProvisioned(
+        PoolId indexed poolId, // Pool identifier
+        address indexed provider, // Liquidity provider
+        bytes encryptedAmount, // Encrypted liquidity amount
+        bytes encryptedLowerTick, // Encrypted lower tick of the range
+        bytes encryptedUpperTick // Encrypted upper tick of the range
+    );
+    
+    event EncryptedRebalancingDecision(
+        PoolId indexed poolId, // Pool identifier
+        bytes encryptedDecision, // Encrypted rebalancing decision
+        bytes encryptedCurrentTick, // Encrypted current tick
+        bytes encryptedThreshold // Encrypted threshold comparison
     );
 
     // Initializes the contract with pool manager, tick offset, and initial owner
@@ -216,14 +250,28 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         position.currentTick = currentTick;
         position.liquidityAmount += liquidityToAdd;
         
-        // Track liquidity ownership
-        liquidityOwnership[poolId][params.recipient] += liquidityToAdd;
+        // Track liquidity ownership with encryption
+        euint256 currentUserLiquidity = encryptedLiquidityOwnership[poolId][params.recipient];
+        euint256 newUserLiquidity = FHE.add(currentUserLiquidity, FHE.asEuint256(liquidityToAdd));
+        encryptedLiquidityOwnership[poolId][params.recipient] = newUserLiquidity;
         
-        // Update total liquidity in pool configuration
+        // Update encrypted total liquidity
+        euint256 currentTotalLiquidity = encryptedTotalLiquidity[poolId];
+        euint256 newTotalLiquidity = FHE.add(currentTotalLiquidity, FHE.asEuint256(liquidityToAdd));
+        encryptedTotalLiquidity[poolId] = newTotalLiquidity;
+        
+        // Update total liquidity in pool configuration (public for compatibility)
         PoolConfiguration storage config = poolConfigurations[poolId];
         config.totalLiquidity += liquidityToAdd;
 
-        emit LiquidityProvisioned(poolId, params.recipient, liquidityToAdd, lowerTick, upperTick);
+        // Emit encrypted liquidity provision for MEV protection
+        emit EncryptedLiquidityProvisioned(
+            poolId, 
+            params.recipient, 
+            abi.encode(newUserLiquidity), // Encrypted amount
+            abi.encode(FHE.asEuint32(uint32(int32(lowerTick)))),
+            abi.encode(FHE.asEuint32(uint32(int32(upperTick))))
+        );
 
         return liquidityToAdd;
     }
@@ -237,9 +285,13 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         PoolId poolId = poolKey.toId();
         if (!poolConfigurations[poolId].isActive) revert PoolNotConfigured();
         
-        // Check if caller owns enough liquidity
-        // msg.sender will be reliable as these funcs will be called directly by the caller
-        if (liquidityOwnership[poolId][msg.sender] < liquidityAmount) {
+        // Check if caller owns enough liquidity using encrypted comparison
+        euint256 userLiquidity = encryptedLiquidityOwnership[poolId][msg.sender];
+        euint256 requestedAmount = FHE.asEuint256(liquidityAmount);
+        ebool hasEnoughLiquidity = FHE.gte(userLiquidity, requestedAmount);
+        
+        (bool hasEnough, ) = FHE.getDecryptResultSafe(hasEnoughLiquidity);
+        if (!hasEnough) {
             revert UnauthorizedLiquidityRemoval();
         }
         
@@ -266,47 +318,86 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         // and we're only updating our internal state after the callback completes
         position.liquidityAmount -= liquidityAmount;
         
-        // Update liquidity ownership
-        liquidityOwnership[poolId][msg.sender] -= liquidityAmount;
+        // Update encrypted liquidity ownership
+        euint256 currentUserLiquidity = encryptedLiquidityOwnership[poolId][msg.sender];
+        euint256 newUserLiquidity = FHE.sub(currentUserLiquidity, FHE.asEuint256(liquidityAmount));
+        encryptedLiquidityOwnership[poolId][msg.sender] = newUserLiquidity;
+        
+        // Update encrypted total liquidity
+        euint256 currentTotalLiquidity = encryptedTotalLiquidity[poolId];
+        euint256 newTotalLiquidity = FHE.sub(currentTotalLiquidity, FHE.asEuint256(liquidityAmount));
+        encryptedTotalLiquidity[poolId] = newTotalLiquidity;
         
         // Update total liquidity in pool configuration
         PoolConfiguration storage config = poolConfigurations[poolId];
         config.totalLiquidity -= liquidityAmount;
 
-        emit LiquidityWithdrawn(poolId, recipient, liquidityAmount, lowerTick, upperTick);
+        // Emit encrypted liquidity withdrawal for MEV protection
+        emit EncryptedLiquidityWithdrawn(
+            poolId, 
+            recipient, 
+            abi.encode(FHE.asEuint256(liquidityAmount)),
+            abi.encode(FHE.asEuint32(uint32(int32(lowerTick)))),
+            abi.encode(FHE.asEuint32(uint32(int32(upperTick))))
+        );
     }
 
-    // // Returns the current liquidity amount for a pool
-    // function getLiquidityAmount(PoolKey calldata poolKey) external view returns (uint256 liquidityAmount) {
-    //     PoolId poolId = poolKey.toId();
-    //     return liquidityPositions[poolId].liquidityAmount;
-    // }
     
-    // Returns the liquidity amount owned by a specific user in a pool
-    function getUserLiquidityAmount(PoolKey calldata poolKey, address user) external view returns (uint256 liquidityAmount) {
+    // Internal function to get user liquidity amount (MEV-protected - no external access)
+    function _getUserLiquidityAmount(PoolKey calldata poolKey, address user) internal view returns (uint256 liquidityAmount) {
         PoolId poolId = poolKey.toId();
-        return liquidityOwnership[poolId][user];
+        euint256 encryptedAmount = encryptedLiquidityOwnership[poolId][user];
+        (uint256 amount, bool success) = FHE.getDecryptResultSafe(encryptedAmount);
+        
+        // If FHE decryption fails, return 0 for security (no public fallback)
+        if (!success) {
+            return 0;
+        }
+        
+        return amount;
     }
 
-    // Configures rebalancing strategy for a pool
-    function configureRebalancingStrategy(PoolKey calldata poolKey, RebalancingStrategy calldata strategy) external onlyOwner {
+    // Returns the liquidity amount owned by a specific user in a pool (MEV-protected)
+    function getUserLiquidityAmount(PoolKey calldata poolKey, address user) external view returns (uint256 liquidityAmount) {
+        // Only allow users to check their own liquidity to prevent MEV analysis
+        require(msg.sender == user, "Only owner can check their liquidity");
+        
+        return _getUserLiquidityAmount(poolKey, user);
+    }
+
+    // Configures rebalancing strategy for a pool with ENCRYPTED parameters only (no public fallback)
+    function configureEncryptedRebalancingStrategy(
+        PoolKey calldata poolKey, 
+        uint24 priceThreshold,
+        uint32 cooldownPeriod,
+        int24 rangeWidth,
+        bool autoRebalance,
+        uint24 maxSlippage
+    ) external onlyOwner {
         // Validate strategy parameters
-        if (strategy.priceThreshold == 0 || strategy.priceThreshold > MAX_PRICE_DEVIATION) {
+        if (priceThreshold == 0 || priceThreshold > MAX_PRICE_DEVIATION) {
             revert InvalidConfiguration();
         }
-        if (strategy.rangeWidth <= 0 || strategy.rangeWidth > 2000) {
+        if (rangeWidth <= 0 || rangeWidth > 2000) {
             revert InvalidConfiguration();
         }
         
         PoolId poolId = poolKey.toId();
-        rebalancingStrategies[poolId] = strategy;
         
-        emit StrategyUpdated(
+        // Store ONLY encrypted strategy parameters (no public storage)
+        encryptedPriceThresholds[poolId] = FHE.asEuint256(priceThreshold);
+        encryptedCooldownPeriods[poolId] = FHE.asEuint32(cooldownPeriod);
+        encryptedRangeWidths[poolId] = FHE.asEuint32(uint32(int32(rangeWidth)));
+        encryptedAutoRebalancing[poolId] = FHE.asEbool(autoRebalance);
+        encryptedMaxSlippage[poolId] = FHE.asEuint32(maxSlippage);
+        
+        // Emit ONLY encrypted events (no public strategy data leaked)
+        emit EncryptedStrategyUpdated(
             poolId,
-            strategy.priceThreshold,
-            strategy.cooldownPeriod,
-            strategy.rangeWidth,
-            strategy.autoRebalance
+            abi.encode(encryptedPriceThresholds[poolId]),
+            abi.encode(encryptedCooldownPeriods[poolId]),
+            abi.encode(encryptedRangeWidths[poolId]),
+            abi.encode(encryptedAutoRebalancing[poolId])
         );
     }
 
@@ -314,72 +405,52 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
     function executeRebalancing(PoolKey calldata poolKey) external {
         _performRebalancing(poolKey);
     }
-
-    // /// Sets the default rebalancing strategy for new pools
-    // /// @param priceThreshold Default price threshold for rebalancing (basis points)
-    // /// @param cooldownPeriod Default cooldown period between rebalancings (seconds)
-    // /// @param rangeWidth Default tick range width
-    // /// @param autoRebalance Whether auto-rebalancing is enabled by default
-    // /// @param maxSlippage Default maximum slippage tolerance (basis points)
-    // function setDefaultRebalancingStrategy(
-    //     uint24 priceThreshold,
-    //     uint32 cooldownPeriod,
-    //     int24 rangeWidth,
-    //     bool autoRebalance,
-    //     uint24 maxSlippage
-    // ) external onlyOwner {
-    //     if (priceThreshold == 0 || priceThreshold > MAX_PRICE_DEVIATION) {
-    //         revert InvalidConfiguration();
-    //     }
-    //     if (rangeWidth <= 0 || rangeWidth > 2000) {
-    //         revert InvalidConfiguration();
-    //     }
-        
-    //     // Update default constants (these would need to be made mutable)
-    //     // For now, we'll emit an event that can be used by frontends
-    //     emit DefaultStrategyUpdated(priceThreshold, cooldownPeriod, rangeWidth, autoRebalance, maxSlippage);
-    // }
-
-    // /// Configures rebalancing strategy for a specific pool (owner override)
-    // /// @param poolKey The pool to configure
-    // /// @param strategy The rebalancing strategy
-    // function configurePoolRebalancingStrategy(PoolKey calldata poolKey, RebalancingStrategy calldata strategy) 
-    //     external 
-    //     onlyOwner 
-    // {
-    //     // Validate strategy parameters
-    //     if (strategy.priceThreshold == 0 || strategy.priceThreshold > MAX_PRICE_DEVIATION) {
-    //         revert InvalidConfiguration();
-    //     }
-    //     if (strategy.rangeWidth <= 0 || strategy.rangeWidth > 2000) {
-    //         revert InvalidConfiguration();
-    //     }
-        
-    //     PoolId poolId = poolKey.toId();
-    //     rebalancingStrategies[poolId] = strategy;
-        
-    //     emit StrategyUpdated(
-    //         poolId,
-    //         strategy.priceThreshold,
-    //         strategy.cooldownPeriod,
-    //         strategy.rangeWidth,
-    //         strategy.autoRebalance
-    //     );
-    // }
+    
+    // Get encrypted strategy parameters (for verification/debugging)
+    function getEncryptedStrategy(PoolKey calldata poolKey) external view returns (
+        bytes memory encryptedThresholdData,
+        bytes memory encryptedCooldownData,
+        bytes memory encryptedRangeWidthData,
+        bytes memory encryptedAutoRebalanceData,
+        bytes memory encryptedMaxSlippageData
+    ) {
+        PoolId poolId = poolKey.toId();
+        return (
+            abi.encode(encryptedPriceThresholds[poolId]),
+            abi.encode(encryptedCooldownPeriods[poolId]),
+            abi.encode(encryptedRangeWidths[poolId]),
+            abi.encode(encryptedAutoRebalancing[poolId]),
+            abi.encode(encryptedMaxSlippage[poolId])
+        );
+    }
+    
+    // Get encrypted liquidity amounts (for verification/debugging)
+    function getEncryptedLiquidity(PoolKey calldata poolKey, address user) external view returns (
+        bytes memory encryptedUserLiquidityData,
+        bytes memory encryptedTotalLiquidityData
+    ) {
+        PoolId poolId = poolKey.toId();
+        return (
+            abi.encode(encryptedLiquidityOwnership[poolId][user]),
+            abi.encode(encryptedTotalLiquidity[poolId])
+        );
+    }
 
     /// Emergency function to pause rebalancing for a specific pool
     /// @param poolKey The pool to pause
     function pausePoolRebalancing(PoolKey calldata poolKey) external onlyOwner {
         PoolId poolId = poolKey.toId();
-        RebalancingStrategy storage strategy = rebalancingStrategies[poolId];
-        strategy.autoRebalance = false;
         
-        emit StrategyUpdated(
+        // Update encrypted auto-rebalancing flag only (no public storage)
+        encryptedAutoRebalancing[poolId] = FHE.asEbool(false);
+        
+        // Emit encrypted event only
+        emit EncryptedStrategyUpdated(
             poolId,
-            strategy.priceThreshold,
-            strategy.cooldownPeriod,
-            strategy.rangeWidth,
-            false
+            abi.encode(encryptedPriceThresholds[poolId]),
+            abi.encode(encryptedCooldownPeriods[poolId]),
+            abi.encode(encryptedRangeWidths[poolId]),
+            abi.encode(encryptedAutoRebalancing[poolId])
         );
     }
 
@@ -387,15 +458,17 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
     /// @param poolKey The pool to resume
     function resumePoolRebalancing(PoolKey calldata poolKey) external onlyOwner {
         PoolId poolId = poolKey.toId();
-        RebalancingStrategy storage strategy = rebalancingStrategies[poolId];
-        strategy.autoRebalance = true;
         
-        emit StrategyUpdated(
+        // Update encrypted auto-rebalancing flag only (no public storage)
+        encryptedAutoRebalancing[poolId] = FHE.asEbool(true);
+        
+        // Emit encrypted event only
+        emit EncryptedStrategyUpdated(
             poolId,
-            strategy.priceThreshold,
-            strategy.cooldownPeriod,
-            strategy.rangeWidth,
-            true
+            abi.encode(encryptedPriceThresholds[poolId]),
+            abi.encode(encryptedCooldownPeriods[poolId]),
+            abi.encode(encryptedRangeWidths[poolId]),
+            abi.encode(encryptedAutoRebalancing[poolId])
         );
     }
 
@@ -456,14 +529,15 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
             feesAccrued: false
         });
         
-        // Set default rebalancing strategy
-        rebalancingStrategies[poolId] = RebalancingStrategy({
-            priceThreshold: DEFAULT_THRESHOLD,
-            cooldownPeriod: DEFAULT_COOLDOWN,
-            rangeWidth: DEFAULT_RANGE_WIDTH,
-            autoRebalance: true,
-            maxSlippage: 100 // 1%
-        });
+        // Initialize encrypted strategy parameters only (no public storage)
+        encryptedPriceThresholds[poolId] = FHE.asEuint256(DEFAULT_THRESHOLD);
+        encryptedCooldownPeriods[poolId] = FHE.asEuint32(DEFAULT_COOLDOWN);
+        encryptedRangeWidths[poolId] = FHE.asEuint32(uint32(int32(DEFAULT_RANGE_WIDTH)));
+        encryptedAutoRebalancing[poolId] = FHE.asEbool(true);
+        encryptedMaxSlippage[poolId] = FHE.asEuint32(100);
+        
+        // Initialize encrypted liquidity tracking
+        encryptedTotalLiquidity[poolId] = FHE.asEuint256(0);
 
         return this.beforeInitialize.selector;
     }
@@ -488,15 +562,61 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         return this.afterInitialize.selector;
     }
 
-    // Restricts liquidity addition to this contract
+    // Allows liquidity addition from any user and tracks it
     function beforeAddLiquidity(
         address sender,
-        PoolKey calldata,
-        ModifyLiquidityParams calldata,
+        PoolKey calldata poolKey,
+        ModifyLiquidityParams calldata params,
         bytes calldata
-    ) external view override returns (bytes4) {
-        if (sender != address(this)) revert UnauthorizedAccess();
+    ) external override returns (bytes4) {
+        // Track liquidity ownership when added
+        if (params.liquidityDelta > 0) {
+            _trackLiquidityAddition(poolKey, sender, uint128(uint256(params.liquidityDelta)), params.tickLower, params.tickUpper);
+        }
         return this.beforeAddLiquidity.selector;
+    }
+
+    // Internal function to track liquidity addition
+    function _trackLiquidityAddition(
+        PoolKey calldata poolKey,
+        address provider,
+        uint128 liquidityAmount,
+        int24 tickLower,
+        int24 tickUpper
+    ) internal {
+        PoolId poolId = poolKey.toId();
+        
+        // Update liquidity position
+        LiquidityPosition storage position = liquidityPositions[poolId];
+        position.lowerTick = tickLower;
+        position.upperTick = tickUpper;
+        position.currentTick = 0; // Will be updated during swaps
+        position.liquidityAmount += liquidityAmount;
+        
+        // Update pool configuration
+        PoolConfiguration storage config = poolConfigurations[poolId];
+        config.totalLiquidity += liquidityAmount;
+        
+        // Track encrypted liquidity ownership
+        euint256 currentUserLiquidity = encryptedLiquidityOwnership[poolId][provider];
+        euint256 newUserLiquidity = FHE.add(currentUserLiquidity, FHE.asEuint256(liquidityAmount));
+        encryptedLiquidityOwnership[poolId][provider] = newUserLiquidity;
+        
+        // Update encrypted total liquidity
+        euint256 currentTotalLiquidity = encryptedTotalLiquidity[poolId];
+        euint256 newTotalLiquidity = FHE.add(currentTotalLiquidity, FHE.asEuint256(liquidityAmount));
+        encryptedTotalLiquidity[poolId] = newTotalLiquidity;
+        
+        // Removed public fallback for true MEV protection
+        
+        // Emit encrypted liquidity provision for MEV protection
+        emit EncryptedLiquidityProvisioned(
+            poolId, 
+            provider, 
+            abi.encode(newUserLiquidity), // Encrypted amount
+            abi.encode(FHE.asEuint32(uint32(int32(tickLower)))),
+            abi.encode(FHE.asEuint32(uint32(int32(tickUpper))))
+        );
     }
 
     // Handles swap events and triggers rebalancing if needed
@@ -512,10 +632,14 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
             poolConfigurations[poolId].feesAccrued = true;
         }
 
-        // Trigger rebalancing if enabled and conditions are met
-        RebalancingStrategy memory strategy = rebalancingStrategies[poolId];
-        if (strategy.autoRebalance && _shouldTriggerRebalancing(poolKey)) {
-            _performRebalancing(poolKey);
+        // Trigger rebalancing using encrypted strategy parameters only
+        try this._shouldTriggerRebalancing(poolKey) returns (bool shouldRebalance) {
+            if (shouldRebalance) {
+                _performRebalancing(poolKey);
+            }
+        } catch {
+            // If FHE operations fail, skip rebalancing for security
+            // This ensures the swap can still proceed without leaking strategy info
         }
 
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
@@ -581,24 +705,64 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         return uint128(FullMath.mulDiv(amount1, FixedPoint96.Q96, sqrtPriceBX96 - sqrtPriceAX96));
     }
     
-    // Checks if rebalancing should be triggered
-    function _shouldTriggerRebalancing(PoolKey calldata poolKey) internal view returns (bool) {
+    // Checks if rebalancing should be triggered using encrypted parameters
+    function _shouldTriggerRebalancing(PoolKey calldata poolKey) external returns (bool) {
         PoolId poolId = poolKey.toId();
-        RebalancingStrategy memory strategy = rebalancingStrategies[poolId];
         PoolConfiguration memory config = poolConfigurations[poolId];
         
-        // Skip if within cooldown period
-        if (block.timestamp - config.lastRebalanceTimestamp < strategy.cooldownPeriod) {
+        // Early return if pool is not active or no liquidity
+        if (!config.isActive || config.totalLiquidity < MIN_LIQUIDITY_THRESHOLD) {
             return false;
         }
         
-        // Skip if liquidity is below threshold
-        if (config.totalLiquidity < MIN_LIQUIDITY_THRESHOLD) {
+        // Get encrypted strategy parameters
+        euint32 encryptedCooldown = encryptedCooldownPeriods[poolId];
+        euint256 encryptedTotalLiquidityAmount = encryptedTotalLiquidity[poolId];
+        ebool encryptedAutoRebalance = encryptedAutoRebalancing[poolId];
+        
+        // Check cooldown period using encrypted comparison
+        euint256 currentTime = FHE.asEuint256(block.timestamp);
+        euint256 lastRebalanceTime = FHE.asEuint256(config.lastRebalanceTimestamp);
+        euint256 timeSinceRebalance = FHE.sub(currentTime, lastRebalanceTime);
+        
+        // Convert euint32 to euint256 for comparison
+        euint256 encryptedCooldown256 = FHE.asEuint256(encryptedCooldown);
+        ebool cooldownPassed = FHE.gte(timeSinceRebalance, encryptedCooldown256);
+        
+        // Check liquidity threshold using encrypted comparison
+        euint256 minLiquidityThreshold = FHE.asEuint256(MIN_LIQUIDITY_THRESHOLD);
+        ebool hasEnoughLiquidity = FHE.gte(encryptedTotalLiquidityAmount, minLiquidityThreshold);
+        
+        // Combine all conditions using encrypted boolean operations
+        ebool shouldRebalance = FHE.and(
+            FHE.and(cooldownPassed, hasEnoughLiquidity),
+            FHE.and(encryptedAutoRebalance, FHE.asEbool(config.feesAccrued))
+        );
+        
+        // Decrypt the final decision with proper error handling
+        (bool result, bool success) = FHE.getDecryptResultSafe(shouldRebalance);
+        
+        // If decryption fails, return false for security (no public fallback)
+        if (!success) {
+            // Emit failure event for monitoring
+            emit EncryptedRebalancingDecision(
+                poolId,
+                abi.encode(FHE.asEbool(false)), // Encrypted false
+                abi.encode(FHE.asEuint256(block.timestamp)),
+                abi.encode(encryptedCooldown)
+            );
             return false;
         }
         
-        // Trigger if fees have accrued
-        return config.feesAccrued;
+        // Emit encrypted decision for transparency (but decision is still hidden)
+        emit EncryptedRebalancingDecision(
+            poolId,
+            abi.encode(shouldRebalance),
+            abi.encode(FHE.asEuint256(block.timestamp)),
+            abi.encode(encryptedCooldown)
+        );
+        
+        return result;
     }
 
     // Rebalances liquidity to a new tick range
@@ -656,7 +820,15 @@ contract LiquidityRebalancer is BaseHook, Ownable, IUnlockCallback {
         config.lastRebalanceTimestamp = block.timestamp;
         config.feesAccrued = false;
 
-        emit RebalancingTriggered(poolId, oldLowerTick, oldUpperTick, newLowerTick, newUpperTick, block.timestamp);
+        // Emit encrypted rebalancing event for MEV protection
+        emit EncryptedRebalancingTriggered(
+            poolId, 
+            abi.encode(FHE.asEuint32(uint32(int32(oldLowerTick)))),
+            abi.encode(FHE.asEuint32(uint32(int32(oldUpperTick)))),
+            abi.encode(FHE.asEuint32(uint32(int32(newLowerTick)))),
+            abi.encode(FHE.asEuint32(uint32(int32(newUpperTick)))),
+            abi.encode(FHE.asEuint256(block.timestamp))
+        );
     }
 
     // Settles token balances for negative deltas

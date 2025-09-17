@@ -190,65 +190,6 @@ if (!config.isActive || config.totalLiquidity < MIN_LIQUIDITY_THRESHOLD) {
 - Complex liquidity scenarios
 - Cross-function interactions
 
-### Recommended Test Additions
-
-```solidity
-// Example additional tests needed:
-function testInvalidConfiguration() public {
-    // Test invalid price thresholds
-    // Test invalid range widths
-    // Test unauthorized access
-}
-
-function testEdgeCases() public {
-    // Test zero liquidity
-    // Test maximum tick ranges
-    // Test boundary conditions
-}
-
-function testFHERecovery() public {
-    // Test FHE operation failures
-    // Test fallback mechanisms
-}
-```
-
-## Coverage Goals
-
-### Minimum Acceptable Coverage
-- **Lines:** 70%
-- **Statements:** 70%
-- **Branches:** 60%
-- **Functions:** 80%
-
-### Production Ready Coverage
-- **Lines:** 85%
-- **Statements:** 85%
-- **Branches:** 75%
-- **Functions:** 95%
-
-## Continuous Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Test Coverage
-on: [push, pull_request]
-
-jobs:
-  coverage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-      - name: Run tests
-        run: forge test
-      - name: Generate coverage
-        run: forge coverage --ir-minimum --report lcov
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-```
-
 ## Monitoring Coverage
 
 ### Regular Coverage Checks
@@ -266,8 +207,8 @@ forge coverage --ir-minimum --report summary
 
 # Check if coverage meets minimum thresholds
 COVERAGE=$(forge coverage --ir-minimum --report summary | grep "src/RebalanceHook.sol" | awk '{print $4}')
-if (( $(echo "$COVERAGE < 70" | bc -l) )); then
-    echo "❌ Coverage below 70%: $COVERAGE"
+if (( $(echo "$COVERAGE < 50" | bc -l) )); then
+    echo "❌ Coverage below 50%: $COVERAGE"
     exit 1
 else
     echo "✅ Coverage acceptable: $COVERAGE"

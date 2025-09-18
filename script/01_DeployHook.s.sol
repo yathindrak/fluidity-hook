@@ -17,7 +17,7 @@ contract DeployHookScript is BaseScript {
         );
 
         // Mine a salt that will produce a hook address with the correct flags
-        int24 tickOffset = 60;
+        int24 tickOffset = 120; // different tick offset to generate new address
         address initialOwner = msg.sender; // Deployer becomes the initial owner
         bytes memory constructorArgs = abi.encode(poolManager, tickOffset, initialOwner);
             (address hookAddress, bytes32 salt) =

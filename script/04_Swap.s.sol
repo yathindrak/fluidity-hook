@@ -1,6 +1,7 @@
 pragma solidity ^0.8.26;
 
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 import {BaseScript} from "./base/BaseScript.sol";
 
@@ -23,7 +24,7 @@ contract SwapScript is BaseScript {
 
         // Execute swap
         swapRouter.swapExactTokensForTokens({
-            amountIn: 1e6,
+            amountIn: 1e18,
             amountOutMin: 0, // Very bad, but we want to allow for unlimited price impact
             zeroForOne: true,
             poolKey: poolKey,

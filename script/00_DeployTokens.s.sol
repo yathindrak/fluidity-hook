@@ -23,17 +23,17 @@ contract DeployTokensScript is Script {
 
     // Default token configurations
     TokenConfig public token0Config = TokenConfig({
-        name: "Mock WETH",
-        symbol: "mWETH",
+        name: "Mock TokenA",
+        symbol: "mTokenA",
         decimals: 18,
         initialSupply: 1_000_000 * 10**18 // 1M tokens
     });
 
     TokenConfig public token1Config = TokenConfig({
-        name: "Mock USDC", 
-        symbol: "mUSDC",
-        decimals: 6,
-        initialSupply: 1_000_000 * 10**6 // 1M tokens
+        name: "Mock TokenB", 
+        symbol: "mTokenB",
+        decimals: 18,
+        initialSupply: 1_000_000 * 10**18 // 1M tokens
     });
 
     function run() public {
@@ -87,49 +87,5 @@ contract DeployTokensScript is Script {
         console2.log("Deployer Token0 balance:", token0.balanceOf(msg.sender) / (10 ** token0.decimals()));
         console2.log("Deployer Token1 balance:", token1.balanceOf(msg.sender) / (10 ** token1.decimals()));
         console2.log("======================");
-    }
-
-    /// @notice Deploy a custom token with specific configuration
-    /// @param name Token name
-    /// @param symbol Token symbol
-    /// @param decimals Number of decimals
-    /// @param initialSupply Initial supply (in smallest unit)
-    /// @return The deployed token contract
-    function deployCustomToken(
-        string memory name,
-        string memory symbol,
-        uint8 decimals,
-        uint256 initialSupply
-    ) public returns (TestToken) {
-        vm.startBroadcast();
-        TestToken token = new TestToken(name, symbol, decimals, initialSupply);
-        vm.stopBroadcast();
-        
-        console2.log("Custom token deployed at:", address(token));
-        return token;
-    }
-
-    /// @notice Mint additional tokens to a specific address
-    /// @param token The token contract
-    /// @param to The address to mint to
-    /// @param amount The amount to mint
-    function mintTokens(TestToken token, address to, uint256 amount) public {
-        vm.startBroadcast();
-        token.mint(to, amount);
-        vm.stopBroadcast();
-        
-        console2.log("Minted", amount / (10 ** token.decimals()), "tokens to", to);
-    }
-
-    /// @notice Get token information
-    /// @param token The token contract
-    function getTokenInfo(TestToken token) public view {
-        console2.log("=== Token Information ===");
-        console2.log("Address:", address(token));
-        console2.log("Name:", token.name());
-        console2.log("Symbol:", token.symbol());
-        console2.log("Decimals:", token.decimals());
-        console2.log("Total Supply:", token.totalSupply() / (10 ** token.decimals()));
-        console2.log("========================");
     }
 }

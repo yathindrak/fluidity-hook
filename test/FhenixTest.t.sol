@@ -37,15 +37,4 @@ contract FhenixTest is Test, Deployers {
         assertTrue(permissions.beforeAddLiquidity);
         assertTrue(permissions.beforeSwap);
     }
-    
-    function testFhenixImports() public view {
-        // This test verifies that Fhenix imports work correctly
-        // If this compiles and runs, the Fhenix integration is working
-        
-        // Test that we can create encrypted data types (this tests the imports)
-        // Note: We can't actually create euint256 in a view function, but the import should work
-        
-        // If we get here without compilation errors, the Fhenix imports are working
-        assertTrue(true, "Fhenix imports are working correctly");
-    }
 }

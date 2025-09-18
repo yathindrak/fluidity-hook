@@ -13,7 +13,7 @@ contract LiquidityHelpers is BaseScript {
         PoolKey memory poolKey,
         int24 _tickLower,
         int24 _tickUpper,
-        uint256 liquidity,
+        uint128 liquidity,
         uint256 amount0Max,
         uint256 amount1Max,
         address recipient,

@@ -37,7 +37,6 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
     // Addresses
     address user = address(1);
 
-    // Pool data
     PoolKey poolKey;
 
     function setUp() public {
@@ -253,12 +252,6 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
             }),
             formattedHookData
         );
-        console.log("Added liquidity");
-
-        // Check that liquidity was added - liquidityPositions is now private for MEV protection
-        // We can verify liquidity addition through events or other means
-        // The liquidity position data is now encrypted and private to prevent MEV analysis
-        console.log("Liquidity position data is now private for MEV protection");
     }
 
     function test_FhenixEncryptedStrategy() public {
@@ -295,9 +288,6 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
         // (This simulates what MEV bots would see - encrypted data they can't read)
         assertTrue(encryptedThreshold.length > 0, "Encrypted threshold should exist");
         assertTrue(encryptedCooldown.length > 0, "Encrypted cooldown should exist");
-        
-        // Public strategy access removed for true MEV protection
-        // Only encrypted strategy parameters are available now
     }
 
     function test_FhenixEncryptedLiquidity() public {
@@ -359,8 +349,6 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
         // Test that only the liquidity provider can check their own liquidity
         vm.prank(liquidityProvider);
         uint256 userLiquidity = hook.getUserLiquidityAmount(poolKey, liquidityProvider);
-        // In test environment, FHE might not be fully available, so we accept 0 as valid
-        // This demonstrates the MEV protection - no public fallback data
         console.log("User liquidity amount:", userLiquidity);
     }
 
@@ -405,11 +393,6 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
         }), Constants.ZERO_BYTES);
         
-        // The decision-making process uses encrypted parameters internally
-        // MEV bots cannot see the actual thresholds, cooldown periods, or decision logic
-        // This prevents them from front-running rebalancing operations
-        
-        // Verify that the hook executed without error (encrypted decision making worked)
         (,,, , bool feesAccrued) = hook.poolConfigurations(poolKey.toId());
         assertTrue(feesAccrued, "Fees should be marked as accrued after beforeSwap");
     }
@@ -459,8 +442,6 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
         // Resume rebalancing
         hook.resumePoolRebalancing(poolKey);
         
-        // Public strategy verification removed for MEV protection
-        
         // Get encrypted strategy after resume
         (bytes memory encryptedThresholdFinal, bytes memory encryptedCooldownFinal, bytes memory encryptedRangeWidthFinal, bytes memory encryptedAutoRebalanceFinal, bytes memory encryptedMaxSlippageFinal) = 
             hook.getEncryptedStrategy(poolKey);
@@ -495,14 +476,9 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
             strategy.maxSlippage
         );
         
-        // Simulate what an MEV bot would try to do:
-        // 1. Public strategy access removed for MEV protection
-        
-        // 2. Try to get encrypted strategy parameters (MEV bots can't decrypt these)
+        // Try to get encrypted strategy parameters (MEV bots can't decrypt these)
         (bytes memory encryptedThreshold, bytes memory encryptedCooldown, bytes memory encryptedRangeWidth, bytes memory encryptedAutoRebalance, bytes memory encryptedMaxSlippage) = 
             hook.getEncryptedStrategy(poolKey);
-        
-        // Public strategy verification removed - only encrypted data available
         
         // Verify that the encrypted strategy is not readable by MEV bots
         // The encrypted data should be in Fhenix format, not plain values
@@ -511,9 +487,5 @@ contract FhenixRebalanceHookTestFixed is Test, Deployers, CoFheTest {
         assertTrue(encryptedRangeWidth.length > 0, "Encrypted range width should exist");
         assertTrue(encryptedAutoRebalance.length > 0, "Encrypted auto rebalance should exist");
         assertTrue(encryptedMaxSlippage.length > 0, "Encrypted max slippage should exist");
-        
-        // The key protection: MEV bots cannot decrypt these values to predict rebalancing
-        // They would need the Fhenix private key to decrypt the actual values
-        // This prevents them from front-running rebalancing operations
     }
 }

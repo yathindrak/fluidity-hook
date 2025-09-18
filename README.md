@@ -1,4 +1,4 @@
-# Fluidity - MEV-Resistant Uniswap V4 Hook with FHE
+# Fluidity - MEV-Resistant Uniswap V4 Rebalancing Hook with FHE
 
 A Uniswap V4 hook that uses **Fully Homomorphic Encryption (FHE)** to encrypt strategy configurations, price thresholds, and liquidity parameters protecting them from MEV extraction while providing intelligent liquidity rebalancing. Built in partnership with **Fhenix**.
 

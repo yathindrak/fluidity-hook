@@ -4,7 +4,10 @@ A Uniswap V4 hook that uses **Fully Homomorphic Encryption (FHE)** to encrypt st
 
 ## 🎯 Problems We Solve
 
-Fluidity solves two key problems in DeFi: **strategy privacy** and **liquidity rebalancing**. First, sensitive strategy parameters (price thresholds, rebalancing logic, position sizes) are visible in smart contract storage and events, allowing bots to analyze and replicate successful strategies. Second, manual liquidity management is inefficient - positions need constant rebalancing to maintain optimal capital efficiency. Fluidity addresses both by encrypting strategy configurations using **FHE** to prevent analysis, while providing automated rebalancing that works on encrypted data, maintaining full Uniswap V4 compatibility.
+Fluidity solves two key problems in DeFi: **strategy privacy** and **liquidity rebalancing**. 
+
+1. Sensitive strategy parameters (price thresholds, rebalancing logic, position sizes) are visible in smart contract storage and events, allowing bots to analyze and replicate successful strategies. 
+2. Manual liquidity management is inefficient - positions need constant rebalancing to maintain optimal capital efficiency. Fluidity addresses both by encrypting strategy configurations using **FHE** to prevent analysis, while providing automated rebalancing that works on encrypted data, maintaining full Uniswap V4 compatibility.
 
 ## 💡 Our Solution
 
